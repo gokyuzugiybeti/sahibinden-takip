@@ -2,6 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import os
+import time
+import random
 
 SEARCH_URL = "https://www.sahibinden.com/bmw-3-serisi-320i-ed?sorting=date_desc"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -9,8 +11,16 @@ CHAT_ID = os.environ.get("CHAT_ID")
 SEEN_FILE = "seen_ids.json"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "tr-TR,tr;q=0.9",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Cache-Control": "max-age=0",
 }
 
 def send_telegram(message):
@@ -31,12 +41,21 @@ def save_seen(seen):
 def scrape():
     try:
         first_run = not os.path.exists(SEEN_FILE)
-        response = requests.get(SEARCH_URL, headers=HEADERS, timeout=15)
+        
+        session = requests.Session()
+        # Önce ana sayfayı ziyaret et
+        session.get("https://www.sahibinden.com", headers=HEADERS, timeout=15)
+        time.sleep(random.uniform(2, 4))
+        
+        response = session.get(SEARCH_URL, headers=HEADERS, timeout=15)
+        print(f"Status code: {response.status_code}")
+        
         soup = BeautifulSoup(response.text, "html.parser")
         items = soup.select("tr.searchResultsItem")
 
         if not items:
-            print("İlan bulunamadı.")
+            print("İlan bulunamadı, ham HTML:")
+            print(response.text[:500])
             send_telegram("⚠️ Sahibinden'e bağlanılamadı veya ilan bulunamadı.")
             return
 
