@@ -30,12 +30,14 @@ def save_seen(seen):
 
 def scrape():
     try:
+        first_run = not os.path.exists(SEEN_FILE)
         response = requests.get(SEARCH_URL, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(response.text, "html.parser")
         items = soup.select("tr.searchResultsItem")
 
         if not items:
             print("İlan bulunamadı.")
+            send_telegram("⚠️ Sahibinden'e bağlanılamadı veya ilan bulunamadı.")
             return
 
         seen = load_seen()
@@ -44,7 +46,9 @@ def scrape():
         for item in items:
             try:
                 ilan_id = item.get("data-id", "")
-                if not ilan_id or ilan_id in seen:
+                if not ilan_id:
+                    continue
+                if not first_run and ilan_id in seen:
                     continue
 
                 baslik = item.select_one("td.searchResultsTitleValue a")
@@ -78,11 +82,11 @@ def scrape():
             save_seen(seen)
         else:
             print("Yeni ilan yok.")
-            if not os.path.exists(SEEN_FILE):
-                save_seen(seen)
+            save_seen(seen)
 
     except Exception as e:
         print(f"Genel hata: {e}")
+        send_telegram(f"⚠️ Script hatası: {e}")
 
 if __name__ == "__main__":
     scrape()
