@@ -1,27 +1,15 @@
-import requests
-from bs4 import BeautifulSoup
 import json
 import os
 import time
-import random
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import requests
 
 SEARCH_URL = "https://www.sahibinden.com/bmw-3-serisi-320i-ed?sorting=date_desc"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 SEEN_FILE = "seen_ids.json"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Cache-Control": "max-age=0",
-}
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -39,54 +27,55 @@ def save_seen(seen):
         json.dump(list(seen), f)
 
 def scrape():
+    first_run = not os.path.exists(SEEN_FILE)
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+    driver = webdriver.Chrome(options=options)
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     try:
-        first_run = not os.path.exists(SEEN_FILE)
-        
-        session = requests.Session()
-        # Önce ana sayfayı ziyaret et
-        session.get("https://www.sahibinden.com", headers=HEADERS, timeout=15)
-        time.sleep(random.uniform(2, 4))
-        
-        response = session.get(SEARCH_URL, headers=HEADERS, timeout=15)
-        print(f"Status code: {response.status_code}")
-        
-        soup = BeautifulSoup(response.text, "html.parser")
-        items = soup.select("tr.searchResultsItem")
-
+        driver.get(SEARCH_URL)
+        time.sleep(5)
+        items = driver.find_elements(By.CSS_SELECTOR, "tr.searchResultsItem")
         if not items:
-            print("İlan bulunamadı, ham HTML:")
-            print(response.text[:500])
-            send_telegram("⚠️ Sahibinden'e bağlanılamadı veya ilan bulunamadı.")
+            print("İlan bulunamadı.")
+            send_telegram("⚠️ Sahibinden'de ilan bulunamadı veya erişim engellendi.")
             return
-
         seen = load_seen()
         new_items = []
-
         for item in items:
             try:
-                ilan_id = item.get("data-id", "")
+                ilan_id = item.get_attribute("data-id")
                 if not ilan_id:
                     continue
                 if not first_run and ilan_id in seen:
                     continue
-
-                baslik = item.select_one("td.searchResultsTitleValue a")
-                fiyat = item.select_one("td.searchResultsPriceValue")
-                tarih = item.select_one("td.searchResultsDateValue")
-                link_el = item.select_one("td.searchResultsTitleValue a")
-
-                baslik_text = baslik.text.strip() if baslik else "Bilinmiyor"
-                fiyat_text = fiyat.text.strip() if fiyat else "Bilinmiyor"
-                tarih_text = tarih.text.strip() if tarih else "Bilinmiyor"
-                link = "https://www.sahibinden.com" + link_el["href"] if link_el else ""
-
-                new_items.append((ilan_id, baslik_text, fiyat_text, tarih_text, link))
+                try:
+                    baslik = item.find_element(By.CSS_SELECTOR, "td.searchResultsTitleValue a").text.strip()
+                except:
+                    baslik = "Bilinmiyor"
+                try:
+                    fiyat = item.find_element(By.CSS_SELECTOR, "td.searchResultsPriceValue").text.strip()
+                except:
+                    fiyat = "Bilinmiyor"
+                try:
+                    tarih = item.find_element(By.CSS_SELECTOR, "td.searchResultsDateValue").text.strip()
+                except:
+                    tarih = "Bilinmiyor"
+                try:
+                    link = item.find_element(By.CSS_SELECTOR, "td.searchResultsTitleValue a").get_attribute("href")
+                except:
+                    link = ""
+                new_items.append((ilan_id, baslik, fiyat, tarih, link))
                 seen.add(ilan_id)
-
             except Exception as e:
                 print(f"Hata: {e}")
                 continue
-
         if new_items:
             for ilan_id, baslik, fiyat, tarih, link in new_items:
                 msg = (
@@ -102,10 +91,11 @@ def scrape():
         else:
             print("Yeni ilan yok.")
             save_seen(seen)
-
     except Exception as e:
         print(f"Genel hata: {e}")
         send_telegram(f"⚠️ Script hatası: {e}")
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
     scrape()
